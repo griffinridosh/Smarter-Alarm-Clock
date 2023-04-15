@@ -30,67 +30,87 @@ void setup() {
 #define WIDTH 128
 byte data[WIDTH];
 byte frame_header[4];
+int clockTimeout = 500;
+int blinkTimeout = 500;
 int buttonTimeout = 100;
-byte prev0 = 0;
-byte prev1 = 0;
-byte prev2 = 0;
+bool blink = false;
+byte prev0 = 1;
+byte prev1 = 1;
+byte prev2 = 1;
 
 void loop() {
   // put your main code here, to run repeatedly:
-  if(state.equals("clock")){
-    if(Serial.available()) {
-      Serial.readBytes(frame_header, 4);
-      byte i;
-      for(i=0;i<4;i++) {
-        if(frame_header[i]!=i+61) break;  // verify frame header, should be 61,62,63,64
-      }
-      if(i==4) {  // valid frame header received
-        for(int i=0; i<=2; i++){
-          Time[i] = Serial.read();
+  //if(state.equals("clock")){
+    if(millis() > clockTimeout){//this has to run every iteration or it loses time in other states
+      if(Serial.available()) {
+        Serial.readBytes(frame_header, 4);
+        byte i;
+        for(i=0;i<4;i++) {
+          if(frame_header[i]!=i+61) break;  // verify frame header, should be 61,62,63,64
         }
-        printTime(Time);
-        /*lcd.setCursor(10, 28);
-        String suffix = "AM";
-        for (int n = 0; n <= 2; n++) {
+        if(i==4) {  // valid frame header received
+          for(int i=0; i<=2; i++){
+            Time[i] = Serial.read();
+          }
+          if(state.equals("clock")){
+            printTime(Time, -1);
+            lcd.display();
+            lcd.clearDisplay();
+          }
 
-          //check if AM or PM
-          if(n==0 && Time[n] > 12){
-            suffix = "PM";
-            Time[n] -= 12;
-          }
-          if (Time[n] < 10) {
-          lcd.print("0");
-          }
-          lcd.print(Time[n]);
-          if (n < 2) {
-            lcd.print(":");
-          }
         }
-        lcd.print(" " + suffix);*/
-        delay(500);//FIX THIS
+        else{
+          lcd.clearDisplay();
+          lcd.setTextColor(WHITE);
+          lcd.setCursor(0, 28);
+          lcd.print("Error receiving data");
+        }
+
       }
-      else{
-        lcd.clearDisplay();
-        lcd.setTextColor(WHITE);
-        lcd.setCursor(0, 28);
-        lcd.print("Didn't work");
-      }
-      lcd.display();
-      lcd.clearDisplay();
+      clockTimeout = millis() + 500;
     }
 
 
-  }
+  //}
 
-  else if(state.equals("setalarm")){
+  if(state.equals("setalarm")){
     
-
-    printTime(alarmTimes);
-
-
-
-
+    if(millis() > blinkTimeout){ 
+      //allows the time being set to blink, indicating it to user
+      if(blink){
+        printTime(alarmTimes, settingIndex);
+        lcd.display();
+        lcd.clearDisplay();
+      }
+      else{
+        printTime(alarmTimes, -1);
+        lcd.display();
+        lcd.clearDisplay();
+      }
+      blinkTimeout = millis() + 500;
+      blink = !blink;
+    }
   }
+
+  //CHECK IF ALARM MATCH
+  if(!state.equals("alarm")){
+    bool timesMatch = true;
+    for(int i=0; i<=2; i++){
+      if(Time[i] != alarmTimes[i]){
+        timesMatch = false;
+      }
+    }
+    if(timesMatch){
+      state = "alarm";
+    }
+  }
+
+  //ALARM STATE
+  if(state.equals("alarm")){
+    //chaos ensues
+  }
+
+
 
   //BUTTON CONTROLLER
   byte curr0 = digitalRead(BUTTON0);
@@ -98,48 +118,58 @@ void loop() {
   byte curr2 = digitalRead(BUTTON2);
 
   if(millis() > buttonTimeout){
-
     if(curr0 == 0 && prev0 == 1){
-
+      Serial.print("button0 pushed");
       if(state.equals("clock")){//volume up
 
 
       }
       else if(state.equals("setalarm")){//increase alarm h/m/s by 1
-
+        alarmTimes[settingIndex]++;
+        if(settingIndex == 0)
+          alarmTimes[settingIndex] %= 24;
+        else
+          alarmTimes[settingIndex] %= 60;
       }
 
+      buttonTimeout = millis() + 100;
     }
 
     else if(curr1 == 0 && prev1 == 1){
-      
+      Serial.print("button1 pushed");
       if(state.equals("clock")){//volume down
 
           
       }
       else if(state.equals("setalarm")){//swap between setting h/m/s
-
+        settingIndex++;
+        settingIndex %= 3;
       }
 
+      buttonTimeout = millis() + 100;
     }
 
     else if(curr2 == 0 && prev2 == 1){
-
+      Serial.print("button2 pushed");
       if(state.equals("clock")){//set alarm
         state = "setalarm";
-          
+        settingIndex = 0;
       }
       else if(state.equals("setalarm")){
         state = "clock";
       }
 
+      buttonTimeout = millis() + 100;
     }
 
-    buttonTimeout = millis() + 100;
+  
   }
+  prev0 = curr0;
+  prev1 = curr1;
+  prev2 = curr2;
 }
 
-void printTime(int timeArray[]){
+void printTime(int timeArray[], int blinkIndex){
 
     lcd.setCursor(10, 28);
     String suffix = "AM";
@@ -149,10 +179,15 @@ void printTime(int timeArray[]){
         suffix = "PM";
         displayTime -= 12;
       }
-      if (displayTime < 10) {
-        lcd.print("0");
+      if(blinkIndex != n){
+        if (displayTime < 10) {
+          lcd.print("0");
+        }
+        lcd.print(displayTime);
       }
-      lcd.print(displayTime);
+      else{
+        lcd.print("  ");
+      }
       if (n < 2) {
         lcd.print(":");
       }
