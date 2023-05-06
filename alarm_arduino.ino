@@ -7,12 +7,19 @@ Adafruit_SSD1306 lcd(128, 64); // create display object
 #define BUTTON0 34
 #define BUTTON1 0
 #define BUTTON2 35
-#define SERVO1 23
+
+#define SERVO1 27
+#define SERVO_L 33
+#define SERVO_R 32
+
 #define BAUD_RATE 230400
 #define SS_PIN 2
 #define RST_PIN 4
 MFRC522 mfrc522(SS_PIN, RST_PIN);
+
 Servo catapult;
+Servo leftServo;
+Servo rightServo;
 uint8_t *buffer;
 int Time[3];
 bool stateChange = false;
@@ -22,14 +29,19 @@ int settingIndex = 0;
 double volume = .5;
 int volumeTimer = 0;
 
-
 void setup() {
   // put your setup code here, to run once:
   pinMode(BUTTON0, INPUT_PULLUP);
   pinMode(BUTTON1, INPUT_PULLUP);
   pinMode(BUTTON2, INPUT_PULLUP);    
   catapult.attach(SERVO1);
+  leftServo.attach(SERVO_L);
+  rightServo.attach(SERVO_R);
   catapult.write(180);
+  leftServo.write(0);
+  rightServo.write(180);
+
+  SPI.begin();
   mfrc522.PCD_Init();
   lcd.begin(SSD1306_SWITCHCAPVCC, 0x3C); // init
   lcd.clearDisplay();
@@ -50,6 +62,8 @@ int blinkTimeout = 500;
 int buttonTimeout = 100;
 int rfidTimeout = 500;
 int timeOfAlarm = 0;
+int triggerTimeout = 500;
+bool firstAlarmInter = true;
 bool blink = false;
 byte prev0 = 1;
 byte prev1 = 1;
@@ -147,10 +161,26 @@ void loop() {
   //ALARM STATE
   if(state.equals("alarm")){
     //chaos ensues
-    catapult.write(50);
+    lcd.setCursor(0, 28);
+    lcd.setTextSize(2);
+    lcd.print("WAKE UP");
+    lcd.display();
+    lcd.clearDisplay();
+    lcd.setTextSize(1);    
+    if(mils < timeOfAlarm + triggerTimeout){
+      catapult.write(50);
+      leftServo.write(90);
+      rightServo.write(90);
+    }
+    else{
+      catapult.write(180);
+      leftServo.write(0);
+      rightServo.write(180);
+    }
+
     //wait rfidTimeout milliseconds after alarm goes off
     if(mils > timeOfAlarm + rfidTimeout){
-      Serial.println("aaa");
+      //Serial.println("aaa");
       //if rfid present, turn alarm off
       if (mfrc522.PICC_IsNewCardPresent() && mfrc522.PICC_ReadCardSerial()) {
         // If a card is present, read its UID (unique identifier)
@@ -161,9 +191,11 @@ void loop() {
 
         // Print the card ID to the serial monitor
         Serial.println("Card detected: " + cardID);
+        leftServo.write(0);
+        rightServo.write(180);
         state = "clock";
       }
-      rfidTimeout += 500;
+      rfidTimeout += 100;
     }
   }
 
