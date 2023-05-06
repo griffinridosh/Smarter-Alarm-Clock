@@ -1,26 +1,41 @@
 #include <Adafruit_SSD1306.h>
 #include <Wire.h>
+#include <ESP32Servo.h>
+#include <SPI.h>
+#include <MFRC522.h>
 Adafruit_SSD1306 lcd(128, 64); // create display object
 #define BUTTON0 34
 #define BUTTON1 0
 #define BUTTON2 35
+#define SERVO1 23
 #define BAUD_RATE 230400
+#define SS_PIN 2
+#define RST_PIN 4
+MFRC522 mfrc522(SS_PIN, RST_PIN);
+Servo catapult;
 uint8_t *buffer;
 int Time[3];
 bool stateChange = false;
 String state = "clock";
 int alarmTimes[] = {12,0,0};
 int settingIndex = 0;
+double volume = .5;
+int volumeTimer = 0;
+
 
 void setup() {
   // put your setup code here, to run once:
   pinMode(BUTTON0, INPUT_PULLUP);
   pinMode(BUTTON1, INPUT_PULLUP);
   pinMode(BUTTON2, INPUT_PULLUP);    
+  catapult.attach(SERVO1);
+  catapult.write(180);
+  mfrc522.PCD_Init();
   lcd.begin(SSD1306_SWITCHCAPVCC, 0x3C); // init
   lcd.clearDisplay();
   lcd.setTextColor(WHITE);
   lcd.setCursor(0, 28);
+  lcd.setTextSize(1);
   lcd.print("Waiting for data...");
   lcd.display();
   Serial.begin(BAUD_RATE);
@@ -33,6 +48,8 @@ byte frame_header[4];
 int clockTimeout = 500;
 int blinkTimeout = 500;
 int buttonTimeout = 100;
+int rfidTimeout = 500;
+int timeOfAlarm = 0;
 bool blink = false;
 byte prev0 = 1;
 byte prev1 = 1;
@@ -41,6 +58,7 @@ byte prev2 = 1;
 void loop() {
   // put your main code here, to run repeatedly:
   //if(state.equals("clock")){
+  int mils = millis();
     if(millis() > clockTimeout){//this has to run every iteration or it loses time in other states
       if(Serial.available()) {
         Serial.readBytes(frame_header, 4);
@@ -52,6 +70,7 @@ void loop() {
           for(int i=0; i<=2; i++){
             Time[i] = Serial.read();
           }
+
           if(state.equals("clock")){
             printTime(Time, -1);
             lcd.display();
@@ -63,6 +82,7 @@ void loop() {
           lcd.clearDisplay();
           lcd.setTextColor(WHITE);
           lcd.setCursor(0, 28);
+          lcd.setTextSize(1);
           lcd.print("Error receiving data");
         }
 
@@ -70,11 +90,28 @@ void loop() {
       clockTimeout = millis() + 500;
     }
 
-
+  if(state.equals("volume")){
+    if(volumeTimer > mils){
+      lcd.setCursor(50, 10);
+      lcd.setTextSize(1);
+      lcd.print("Volume:");
+      lcd.drawTriangle(0, 64, 128, 64, 128, 32, WHITE);
+      int xVal = 128 * volume;
+      int yVal = 64 - 32*volume;
+      lcd.fillTriangle(0, 64, xVal, 64, xVal, yVal, WHITE);
+      lcd.display();
+      lcd.clearDisplay();
+    }
+    if(volumeTimer <= mils){
+      state = "clock";
+    }
+  }
   //}
 
   if(state.equals("setalarm")){
-    
+    lcd.setCursor(30, 10);
+    lcd.setTextSize(1);
+    lcd.print("Set Alarm:");
     if(millis() > blinkTimeout){ 
       //allows the time being set to blink, indicating it to user
       if(blink){
@@ -90,10 +127,11 @@ void loop() {
       blinkTimeout = millis() + 500;
       blink = !blink;
     }
+
   }
 
   //CHECK IF ALARM MATCH
-  if(!state.equals("alarm")){
+  if(!state.equals("alarm") && !state.equals("setalarm")){
     bool timesMatch = true;
     for(int i=0; i<=2; i++){
       if(Time[i] != alarmTimes[i]){
@@ -102,12 +140,31 @@ void loop() {
     }
     if(timesMatch){
       state = "alarm";
+      timeOfAlarm = mils;
     }
   }
 
   //ALARM STATE
   if(state.equals("alarm")){
     //chaos ensues
+    catapult.write(50);
+    //wait rfidTimeout milliseconds after alarm goes off
+    if(mils > timeOfAlarm + rfidTimeout){
+      Serial.println("aaa");
+      //if rfid present, turn alarm off
+      if (mfrc522.PICC_IsNewCardPresent() && mfrc522.PICC_ReadCardSerial()) {
+        // If a card is present, read its UID (unique identifier)
+        String cardID = "";
+        for (byte i = 0; i < mfrc522.uid.size; i++) {
+          cardID += String(mfrc522.uid.uidByte[i], HEX);
+        }
+
+        // Print the card ID to the serial monitor
+        Serial.println("Card detected: " + cardID);
+        state = "clock";
+      }
+      rfidTimeout += 500;
+    }
   }
 
 
@@ -118,11 +175,15 @@ void loop() {
   byte curr2 = digitalRead(BUTTON2);
 
   if(millis() > buttonTimeout){
+    //BUTTON 1
     if(curr0 == 0 && prev0 == 1){
       Serial.print("button0 pushed");
-      if(state.equals("clock")){//volume up
-
-
+      if(state.equals("clock") || state.equals("volume")){//volume up
+        if(volume < 1){
+          volume += .1;
+        }
+        volumeTimer = mils + 1000;
+        state = "volume";
       }
       else if(state.equals("setalarm")){//increase alarm h/m/s by 1
         alarmTimes[settingIndex]++;
@@ -130,16 +191,24 @@ void loop() {
           alarmTimes[settingIndex] %= 24;
         else
           alarmTimes[settingIndex] %= 60;
+              
+        printTime(alarmTimes, -1);
+        blinkTimeout = millis() + 500;
+        lcd.display();
+        lcd.clearDisplay();
       }
 
       buttonTimeout = millis() + 100;
     }
-
+    //BUTTON 2
     else if(curr1 == 0 && prev1 == 1){
       Serial.print("button1 pushed");
-      if(state.equals("clock")){//volume down
-
-          
+      if(state.equals("clock") || state.equals("volume")){//volume down
+        if(volume > 0){
+          volume -= .1;
+        }
+        volumeTimer = mils + 1000;
+        state = "volume";
       }
       else if(state.equals("setalarm")){//swap between setting h/m/s
         settingIndex++;
@@ -148,7 +217,7 @@ void loop() {
 
       buttonTimeout = millis() + 100;
     }
-
+    //BUTTON 3
     else if(curr2 == 0 && prev2 == 1){
       Serial.print("button2 pushed");
       if(state.equals("clock")){//set alarm
@@ -171,7 +240,8 @@ void loop() {
 
 void printTime(int timeArray[], int blinkIndex){
 
-    lcd.setCursor(10, 28);
+    lcd.setCursor(0, 28);
+    lcd.setTextSize(2);
     String suffix = "AM";
     for (int n = 0; n <= 2; n++) {
       int displayTime = timeArray[n];
@@ -192,6 +262,7 @@ void printTime(int timeArray[], int blinkIndex){
         lcd.print(":");
       }
     }
+    lcd.setTextSize(1);
     lcd.print(" " + suffix);
 
 }
