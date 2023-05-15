@@ -11,6 +11,7 @@ Adafruit_SSD1306 lcd(128, 64); // create display object
 #define SERVO1 27
 #define SERVO_L 33
 #define SERVO_R 32
+#define BUZZER 17
 
 #define BAUD_RATE 230400
 #define SS_PIN 2
@@ -33,11 +34,12 @@ void setup() {
   // put your setup code here, to run once:
   pinMode(BUTTON0, INPUT_PULLUP);
   pinMode(BUTTON1, INPUT_PULLUP);
-  pinMode(BUTTON2, INPUT_PULLUP);    
+  pinMode(BUTTON2, INPUT_PULLUP);
+  pinMode(BUZZER, OUTPUT);
   catapult.attach(SERVO1);
   leftServo.attach(SERVO_L);
   rightServo.attach(SERVO_R);
-  catapult.write(180);
+  catapult.write(55);
   leftServo.write(0);
   rightServo.write(180);
 
@@ -63,6 +65,7 @@ int buttonTimeout = 100;
 int rfidTimeout = 500;
 int timeOfAlarm = 0;
 int triggerTimeout = 500;
+int buzzerTimeout = 0;
 bool firstAlarmInter = true;
 bool blink = false;
 byte prev0 = 1;
@@ -155,6 +158,7 @@ void loop() {
     if(timesMatch){
       state = "alarm";
       timeOfAlarm = mils;
+      rfidTimeout = 500;
     }
   }
 
@@ -163,17 +167,42 @@ void loop() {
     //chaos ensues
     lcd.setCursor(0, 28);
     lcd.setTextSize(2);
-    lcd.print("WAKE UP");
+    lcd.print("WAKE UP!!!");
     lcd.display();
     lcd.clearDisplay();
-    lcd.setTextSize(1);    
+    lcd.setTextSize(1);
+    
+    //volume is between 0 and 1. If 0, off, otherwise scale
+    //the timeout is half the period. Timeout of 1ms = T = 2
+    //T=2ms means 2 ms cycle, freq = 1/T = 500 ms
+    //want T to go down for freq to go up
+    //use us
+    //10kHz = 100 us = 50 us timeout
+    //100 Hz = 10000 us = 5000 us timeout
+    //vol = 1 -> 50 us
+    //vol = .1 -> 5000 us0
+    int freq = (-5000)*volume + 5550;
+    if(volume > 0){
+      if(micros() > buzzerTimeout){
+        digitalWrite(BUZZER, 1-digitalRead(BUZZER));
+        buzzerTimeout = micros() + freq;
+      }
+
+    }
+
+    int catapultTimeout = 50;
+    int catapultAngle = 180;
     if(mils < timeOfAlarm + triggerTimeout){
-      catapult.write(50);
+      catapult.write(catapultAngle);
       leftServo.write(90);
       rightServo.write(90);
     }
     else{
-      catapult.write(180);
+      if(mils > catapultTimeout){
+        catapultAngle -= 5;
+        catapultTimeout = mils + 50;
+      }
+      catapult.write(55);
       leftServo.write(0);
       rightServo.write(180);
     }
@@ -191,8 +220,10 @@ void loop() {
 
         // Print the card ID to the serial monitor
         Serial.println("Card detected: " + cardID);
+        catapult.write(55);
         leftServo.write(0);
         rightServo.write(180);
+        digitalWrite(BUZZER, 0);
         state = "clock";
       }
       rfidTimeout += 100;
@@ -230,7 +261,7 @@ void loop() {
         lcd.clearDisplay();
       }
 
-      buttonTimeout = millis() + 100;
+      buttonTimeout = millis() + 150;
     }
     //BUTTON 2
     else if(curr1 == 0 && prev1 == 1){
@@ -247,7 +278,7 @@ void loop() {
         settingIndex %= 3;
       }
 
-      buttonTimeout = millis() + 100;
+      buttonTimeout = millis() + 150;
     }
     //BUTTON 3
     else if(curr2 == 0 && prev2 == 1){
@@ -260,7 +291,7 @@ void loop() {
         state = "clock";
       }
 
-      buttonTimeout = millis() + 100;
+      buttonTimeout = millis() + 150;
     }
 
   
